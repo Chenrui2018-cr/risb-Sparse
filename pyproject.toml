@@ -1,13 +1,14 @@
 [project]
-name = "risb"
-dynamic = ["version"]
-description = "Rotationally invariant slave boson mean-field theory."
+name = "risb-sparse"
+version = "0.1.0"
+description = "Modified RISB library with self-defined exact diagonalization solver of the embedding impurity problem."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
-keywords = ["quantum", "mean field", 'correlated electrons', 'quantum embedding', 'risb', 'slave bosons']
+keywords = ["quantum", "RISB", "slave bosons", "embedding", "strong correlation"]
 authors = [
-  {name = "H. L. Nourse"}
+  {name = "H. L. Nourse"},
+  {name = "Chenrui Wang"}
 ]
 dependencies = [
   "numpy",
@@ -18,101 +19,18 @@ classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Physics"
 ]
 
 [project.urls]
-Homepage = "https://github.com/thenoursehorse/risb"
-Documentation = "https://thenoursehorse.github.io/risb"
+Homepage = "https://github.com/Chenrui2018-cr/risb-sparse"
 
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch]
-version.source = "vcs"
-build.hooks.vcs.version-file = "src/risb/version.py"
-version.fallback-version = "0.0.0"
+[tool.hatch.metadata]
+allow-direct-references = true
 
-[project.optional-dependencies]
-docs = [
-  "furo",
-  "myst_parser >=0.13",
-  "myst-parser[linkify]",
-  "sphinx >=4.0",
-  "sphinx-autobuild",
-  "sphinx-copybutton",
-  "sphinx-autodoc-typehints",
-]
-test = [
-  "pytest >=7.0",
-  "pytest-subtests>=0.11",
-  "h5py",
-]
-
-[tool.pytest.ini_options]
-minversion = "7.0"
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
-xfail_strict = true
-filterwarnings = [
-  "error:::risb",
-]
-log_cli_level = "info"
-testpaths = [
-  "tests",
-]
-
-[tool.mypy]
-files = "src"
-python_version = "3.10"
-strict = true
-show_error_codes = true
-enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
-warn_unreachable = true
-
-[[tool.mypy.overrides]]
-module = [ "numpy.*", "scipy.*", "triqs.*", "nox.*"]
-ignore_missing_imports = true
-
-[tool.ruff]
-src = ["src"]
-
-[tool.ruff.format]
-docstring-code-format = true
-
-[tool.ruff.lint]
-extend-select = [
-  "B",           # flake8-bugbear
-  "I",           # isort
-  "ARG",         # flake8-unused-arguments
-  "C4",          # flake8-comprehensions
-  "EM",          # flake8-errmsg
-  "ICN",         # flake8-import-conventions
-  "PGH",         # pygrep-hooks
-  "PIE",         # flake8-pie
-  "PL",          # pylint
-  "PT",          # flake8-pytest-style
-  "PTH",         # flake8-use-pathlib
-  "RET",         # flake8-return
-  "RUF",         # Ruff-specific
-  "SIM",         # flake8-simplify
-  "TID251",      # flake8-tidy-imports.banned-api
-  "T20",         # flake8-print
-  "UP",          # pyupgrade
-  "YTT",         # flake8-2020
-  "D",           # pydocstyle
-  "D204",        # one-blank-line-after-class
-  "D301",        # escape-sequence-in-docstring
-  "D413",        # blank-line-after-last-section
-]
-ignore = [
-  "PLR",    # Design related pylint codes
-  "PT004",  # Incorrect check, usefixtures is the correct way to do this
-  "RUF012", # Would require a lot of ClassVar's
-]
-
-[tool.ruff.lint.pycodestyle]
-max-line-length = 100
-
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
+[tool.hatch.build.targets.wheel]
+packages = ["src/risb_sparse"]

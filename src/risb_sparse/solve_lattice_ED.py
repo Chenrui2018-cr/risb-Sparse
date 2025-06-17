@@ -1,4 +1,5 @@
 # Copyright (c) 2023 H. L. Nourse
+# Modifications copyright (c) 2025 Chenrui Wang
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,28 +12,33 @@
 # GNU General Public License for more details.
 #
 # You may obtain a copy of the License at
-#     https:#www.gnu.org/licenses/gpl-3.0.txt
+#     https://www.gnu.org/licenses/gpl-3.0.txt
 #
-# Authors: H. L. Nourse
+# Original author: H. L. Nourse
+# Modifications by: Chenrui Wang, 2025
+
 
 """Solvers for rotationally invariant slave-boson mean-field theory on a lattice."""
 
 from collections.abc import Callable
 from itertools import product
 from typing import Any, TypeAlias
+import time 
 
 import numpy as np
 from numpy.typing import ArrayLike
 
-from risb import helpers
-from risb.optimize import DIIS
+from risb_sparse import helpers
+from risb_sparse.optimize import DIIS
 
 GfStructType: TypeAlias = list[tuple[str, int]]
 MFType: TypeAlias = dict[ArrayLike]
 
+# for early stop
+class EarlyStopException(Exception):
+    def __init__(self, x_final):
+        self.x_final = x_final
 
-# The structure and methods here have been modeled
-# after github.com/TRIQS/hartree_fock
 class LatticeSolver:
     """
     Rotationally invariant slave-bosons (RISB) lattice solver with a local interaction on each cluster.
@@ -173,6 +179,7 @@ class LatticeSolver:
 
         #: list[dict[numpy.ndarray]] : Renormalization matrix
         #: from c- to f-electrons at the mean-field level for each cluster.
+        #: Initialize the block structure according to the input GF structure:[[("BlockName",size),...],...]
         self.R = self._initialize_block_mf_matrix(self.gf_struct, self.force_real)
 
         for i in range(self.n_clusters):
@@ -367,10 +374,11 @@ class LatticeSolver:
         h0_loc_matrix = self._initialize_block_mf_matrix(
             self.gf_struct, self.force_real
         )
+        # h0_loc_matrix = [{"up_A": np.zeros((3, 3)), "down_A": np.zeros((3, 3))} for _ in range(2)] for example
 
         for i in range(self.n_clusters):
             for bl, _bl_size in self.gf_struct[i]:
-                bl_full = self.gf_struct_mapping[i][bl]
+                bl_full = self.gf_struct_mapping[i][bl] # bl_full name for a larger block, i.e. "up"
                 if self.projectors is not None:
                     h0_loc_matrix[i][bl] = helpers.get_h0_loc_matrix(
                         self.h0_k[bl_full], self.projectors[i][bl]
@@ -384,7 +392,7 @@ class LatticeSolver:
         for function in self.symmetries:
             h0_loc_matrix = function(h0_loc_matrix)
 
-        return h0_loc_matrix
+        return h0_loc_matrix # [{" ":,...},...] local hopping matrices for each cluster,block
 
     def _target_function(
         self,
@@ -394,6 +402,7 @@ class LatticeSolver:
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         self.Lambda, offset = self._unflatten_matrix(x, is_coeff_real=True)
         self.R, _ = self._unflatten_matrix(x, is_coeff_real=False, offset=offset)
+
         self.Lambda, self.R, self.f1, self.f2 = self.one_cycle(
             embedding_param, kweight_param
         )
@@ -421,6 +430,7 @@ class LatticeSolver:
         self,
         embedding_param: list[dict[str, Any]] | None = None,
         kweight_param: dict[str, Any] | None = None,
+        test: bool = False,
     ):
         # -> tuple[MFType, MFType, MFType, MFType]:
         """
@@ -447,15 +457,17 @@ class LatticeSolver:
             hybridzation density matrices on each cluster.
 
         """
+        print("Iteration begins...",flush=True) if test else None
         if kweight_param is None:
             kweight_param = {}
         if embedding_param is None:
             embedding_param = [{} for i in range(self.n_clusters)]
 
-        for function in self.symmetries:
+        for function in self.symmetries: # use symmetry to symmetrize matrices in R and Lambda
             self.R = function(self.R)
             self.Lambda = function(self.Lambda)
 
+        print("Symmetrize the matrices", flush= True) if test else None
         # Make R, Lambda in supercell basis from basis of the clusters
         # FIXME check if projectors get broadcast correctly if they are a diff proj at each k
         self.R_full = dict.fromkeys(self.h0_kin_k, 0)
@@ -479,6 +491,8 @@ class LatticeSolver:
                 bl_full = self.gf_struct_mapping[0][bl]
                 self.R_full[bl_full] += self.R[0][bl]
                 self.Lambda_full[bl_full] += self.Lambda[0][bl]
+        
+        print("Finished computing R and Lambda in full space",flush= True) if test else None
 
         h0_k_R = {}
         # R_h0_k_R = dict()
@@ -491,8 +505,11 @@ class LatticeSolver:
                 self.R_full[bl], self.h0_kin_k[bl], self.bloch_vector_qp[bl]
             )
             # R_h0_k_R[bl] = helpers.get_R_h0_kin_kR(R_full[bl], self.h0_kin_k[bl], self.bloch_vector_qp[bl])
+        
+        print("Finished computing Quasiparticle Hamiltonian",flush= True) if test else None
 
         self.kweights = self.update_weights(self.energies_qp, **kweight_param)
+        print("Finished computing k-point weights",flush= True) if test else None
 
         for i in range(self.n_clusters):
             for bl, _ in self.gf_struct[i]:
@@ -519,6 +536,7 @@ class LatticeSolver:
                         self.kweights[bl_full],
                     )
                 # self.ke_qp[i][bl] = helpers.get_ke(R_h0_k_R[bl_full], self.bloch_vector_qp[bl_full], self.kweights[bl_full], self.projectors[i][bl])
+        print("Finished computing rho_qp and lopsided",flush = True) if test else None
 
         # FIXME More expensive to do this than just storing and working with the coefficients, but
         # nothing compared to solving the embedding problem so this is likely fine
@@ -531,6 +549,7 @@ class LatticeSolver:
             self.rho_qp = function(self.rho_qp)
             # self.lopsided_ke_qp = function(self.lopsided_ke_qp) # FIXME can I do it to ke as well? It should have same symm as D
             # self.ke_qp = function(self.ke_qp)
+        print("Symmetrize quasi-particle density matrices",flush=True) if test else None
 
         for i in range(self.n_clusters):
             for bl, _ in self.gf_struct[i]:
@@ -538,7 +557,7 @@ class LatticeSolver:
                     self.D[i][bl] = helpers.get_d(
                         self.rho_qp[i][bl], self.lopsided_ke_qp[i][bl]
                     ).real
-                    # self.D[i][bl] = helpers.get_d2(self.rho_qp[i][bl], self.ke_qp[i][bl], self.R[i][bl]).real
+                    # self.D[i][bl] = helpers.get_d2(self.rho_qp[i][bl], self.ke_qp[i][bl], self.R[i][bl]).real # will cause error in Mott insulator
                     self.Lambda_c[i][bl] = helpers.get_lambda_c(
                         self.rho_qp[i][bl],
                         self.R[i][bl],
@@ -556,7 +575,7 @@ class LatticeSolver:
                         self.Lambda[i][bl],
                         self.D[i][bl],
                     )
-
+        print("Finished calculating D and Lambda_c,D=",self.D,flush= True) if test else None
         # Enforce matrix structure from symmetries
         self.Lambda_c, _ = self._unflatten_matrix(
             self._flatten_matrix(self.Lambda_c, is_coeff_real=True), is_coeff_real=True
@@ -567,15 +586,40 @@ class LatticeSolver:
         for function in self.symmetries:
             self.Lambda_c = function(self.Lambda_c)
             self.D = function(self.D)
-
+        print("Symmetrize Lambda_c and D", flush= True) if test else None
+        
+        # TODO use self-defined ED functions to solve the embedding problem
+        # Solve the embedding problem for each cluster
+        print("Solving the embedding problem for each cluster", flush=True) if test else None
         for i in range(self.n_clusters):
-            self.embedding[i].set_h_emb(
-                self.Lambda_c[i], self.D[i], self.h0_loc_matrix[i]
-            )
-            self.embedding[i].solve(**embedding_param[i])
-            for bl, _ in self.gf_struct[i]:
-                self.rho_f[i][bl] = self.embedding[i].get_rho_f(bl)
-                self.rho_cf[i][bl] = self.embedding[i].get_rho_cf(bl)
+            print(f"[RISB] Preparing to solve embedding problem for cluster {i}", flush=True) if test else None
+            self.embedding[i].set_h_emb(self.Lambda_c[i], self.D[i], self.h0_loc_matrix[i])
+            print(f"[RISB] set_h_emb for cluster {i} completed", flush=True) if test else None
+            #print(self.embedding[i].h_emb, flush=True) if test and i==0 else None
+            t0 = time.time()
+            # Check renormalization matrix R:
+            # If the largest element of Z = R†R is smaller than a threshold (e.g., 1e-3),
+            # we assume the solution is unphysical or diverging,
+            # skip embedding solve and terminate the iteration with the current result.
+            tor = 1e-3
+            small_R = False
+            for bl, rblock in self.R[0].items():
+                z_temp = rblock.conj().T @ rblock
+                if np.max(np.abs(z_temp)) < tor:
+                    small_R = True
+                    break
+            if not small_R: # solve the embedding problem only if R is below the threshold
+                try:
+                    self.embedding[i].solve(**embedding_param[i])                        
+                except Exception as e:
+                    print(f"[Error] embedding[{i}].solve() raised an exception: {e}", flush=True)
+                    raise
+                print(f"[RISB] Cluster {i} solved, time elapsed = {time.time() - t0:.2f}s", flush=True) if test else None
+                for bl, _ in self.gf_struct[i]:
+                    self.rho_f[i][bl] = self.embedding[i].get_rho_f(bl)
+                    self.rho_cf[i][bl] = self.embedding[i].get_rho_cf(bl)
+            else:
+                print(f"[EarlyStop] Too small R detected (max |Z| < {tor}), skipping some updates and exiting root...")
 
         ## Enforce matrix structure from symmetries
         self.rho_f, _ = self._unflatten_matrix(
@@ -639,6 +683,14 @@ class LatticeSolver:
             self.R = function(self.R)
 
         self.iteration += 1
+        print(f"Iteration {self.iteration} complete,R = {self.R}",flush=True) if test else None
+        #if R is too small, raise an exception
+        if small_R:
+            x_final = np.array(
+                self._flatten_matrix(self.Lambda, is_coeff_real=True)
+                + self._flatten_matrix(self.R, is_coeff_real=False)
+            )
+            raise EarlyStopException(x_final)
 
         return self.Lambda, self.R, self.f1, self.f2
 
@@ -647,6 +699,7 @@ class LatticeSolver:
         one_shot: bool = False,
         embedding_param: list[dict[str, Any]] | None = None,
         kweight_param: dict[str, Any] | None = None,
+        test: bool = False,
         **kwargs,
     ) -> Any:
         """
@@ -661,6 +714,7 @@ class LatticeSolver:
             kwarg options to pass to :meth:`embedding.solve` for each cluster.
         kweight_param : dict, optional
             kwarg options to pass to :meth:`update_weights`.
+        test : bool, optional
         **kwargs
             kwarg options to pass to :meth:`root`.
 
@@ -677,6 +731,8 @@ class LatticeSolver:
             kweight_param = {}
         if embedding_param is None:
             embedding_param = [{} for i in range(self.n_clusters)]
+        
+        print("Begin solving lattice...",flush=True) if test else None
 
         if one_shot:
             self.Lambda, self.R, _, _ = self.one_cycle(embedding_param, kweight_param)
@@ -690,12 +746,16 @@ class LatticeSolver:
                 self._flatten_matrix(self.Lambda, is_coeff_real=True)
                 + self._flatten_matrix(self.R, is_coeff_real=False)
             )
-            x = self.root(
-                fun=self._target_function,
-                x0=x0,
-                args=(embedding_param, kweight_param),
-                **kwargs,
-            )
+            try:
+                x = self.root(
+                    fun=self._target_function,
+                    x0=x0,
+                    args=(embedding_param, kweight_param),
+                    **kwargs,
+                )
+            except EarlyStopException as e:
+                print("Early stopping tiggered due to small R-norm")
+                x = e.x_final
         return x
 
     @property

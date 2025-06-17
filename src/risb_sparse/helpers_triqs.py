@@ -21,7 +21,7 @@ import numpy as np
 from triqs.gf import BlockGf, MeshImFreq, MeshProduct, MeshReFreq, inverse
 from triqs.operators import Operator, c, c_dag
 
-from risb.helpers import get_h0_loc_matrix, get_h_qp
+from risb_sparse.helpers import get_h0_loc_matrix, get_h_qp
 
 
 def get_C_Op(
